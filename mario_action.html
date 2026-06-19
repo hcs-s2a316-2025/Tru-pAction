@@ -1,0 +1,910 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trump Action - Stage Select Update</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+        body { background: #000; color: #fff; font-family: 'monospace', sans-serif; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 100vh; overflow: hidden; }
+        
+        /* ステージセレクトUI */
+        #select-container { margin-bottom: 15px; display: flex; gap: 10px; align-items: center; z-index: 10; }
+        #select-container label { font-size: 16px; font-weight: bold; color: #ffeb3b; text-shadow: 1px 1px #000; }
+        #stage-dropdown { padding: 6px 12px; font-size: 16px; font-weight: bold; background: #222; color: #fff; border: 2px solid #fff; border-radius: 4px; cursor: pointer; }
+        #stage-dropdown:focus { outline: none; border-color: #e91e63; }
+        #select-btn { background: #00a800; color: white; border: none; padding: 6px 15px; font-size: 16px; font-weight: bold; border-radius: 4px; border-bottom: 3px solid #006600; cursor: pointer; }
+        #select-btn:hover { filter: brightness(1.1); }
+
+        #game-container { position: relative; border: 4px solid #fff; box-shadow: 0 0 20px rgba(255,255,255,0.3); width: 800px; height: 448px; }
+        
+        /* 背景ぼかし */
+        #bg-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; filter: blur(6px); }
+        #action-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; background: transparent; }
+        
+        .hud { position: absolute; top: 15px; left: 0; width: 100%; display: flex; justify-content: space-around; font-size: 20px; font-weight: bold; text-shadow: 2px 2px #000; z-index: 2; pointer-events: none; }
+        
+        .screen-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 5; }
+        .screen-overlay h2 { font-size: 36px; margin-bottom: 20px; color: #ffeb3b; text-align: center; }
+        .screen-overlay p { font-size: 16px; margin-bottom: 30px; color: #bbb; text-align: center; line-height: 1.6; white-space: pre-line; }
+        .start-btn { background: #e91e63; color: white; border: none; padding: 12px 30px; font-size: 18px; font-weight: bold; cursor: pointer; border-bottom: 4px solid #ad1457; }
+        .start-btn:hover { filter: brightness(1.1); }
+    </style>
+</head>
+<body>
+
+    <div id="select-container">
+        <label for="stage-dropdown">作戦地域を選択:</label>
+        <select id="stage-dropdown">
+            <optgroup label="WORLD 1 (基本作戦)">
+                <option value="1-1">STAGE 1-1 (地上)</option>
+                <option value="1-2">STAGE 1-2 (地下)</option>
+                <option value="1-3">STAGE 1-3 (大樹)</option>
+                <option value="1-4">STAGE 1-4 (クッパ城)</option>
+            </optgroup>
+            <optgroup label="WORLD 2 (険しき道)">
+                <option value="2-1">STAGE 2-1 (変則アスレチック)</option>
+                <option value="2-2">STAGE 2-2 (狭路地下迷宮)</option>
+                <option value="2-3">STAGE 2-3 (高難度大樹)</option>
+                <option value="2-4">STAGE 2-4 (手強きクッパ城)</option>
+            </optgroup>
+            <optgroup label="WORLD 3 (最終決戦フェーズ)">
+                <option value="3-1">STAGE 3-1 (天空アスレチック)</option>
+                <option value="3-2">STAGE 3-2 (極限地下ラッシュ)</option>
+                <option value="3-3">STAGE 3-3 (終焉の大樹空中戦)</option>
+                <option value="3-4">STAGE 3-4 (ラスト・クッパ城)</option>
+            </optgroup>
+        </select>
+        <button id="select-btn" onclick="applySelectedStage()">ステージを変更</button>
+    </div>
+
+    <div id="game-container">
+        <div class="hud">
+            <div>TRUMP<br><span id="score-val">000000</span></div>
+            <div>VOTES<br>🪙x<span id="coin-val">00</span></div>
+            <div>STAGE<br><span id="stage-val">1-1</span></div>
+            <div>TIME<br><span id="time-val">400</span></div>
+        </div>
+
+        <canvas id="bg-canvas" width="800" height="448"></canvas>
+        <canvas id="action-canvas" width="800" height="448"></canvas>
+
+        <div id="overlay" class="screen-overlay">
+            <h2 id="overlay-title">WORLD 1-1</h2>
+            <p id="overlay-text">【ワールド1〜3 全12ステージ実装完了！】&#13;&#10;画面上のメニューからいつでも好きなステージを選んで出撃可能です。&#13;&#10;数々の難関を突破し、真の完全解放を成し遂げろ！&#13;&#10;&#13;&#10;左右キー：移動 / Space：ジャンプ / Shift：Bダッシュ</p>
+            <button class="start-btn" id="overlay-btn" onclick="initGameStage()">Enterを押して進む</button>
+        </div>
+    </div>
+
+    <script>
+        const actionCanvas = document.getElementById("action-canvas");
+        const ctx = actionCanvas.getContext("2d");
+        const bgCanvas = document.getElementById("bg-canvas");
+        const bgCtx = bgCanvas.getContext("2d");
+
+        let currentWorld = 1;
+        let currentStage = 1;
+        
+        let score = 0;
+        let coins = 0;
+        let stageTimer = 400;
+        let timerId = null;
+        let gameActive = false;
+
+        // 物理パラメータ
+        const GRAVITY = 0.5; 
+        const SCREEN_WIDTH = 800;
+        const SCREEN_HEIGHT = 448;
+        const GROUND_Y = SCREEN_HEIGHT - 48;
+        let cameraX = 0;
+        let levelWidth = 6000;
+
+        // プレイヤー
+        let player = {
+            x: 100, y: 300, w: 26, h: 36,
+            vx: 0, vy: 0,
+            isGrounded: false,
+            facing: 1,
+            onPassableFloor: false // 特殊飛行ギミック用のフラグ
+        };
+
+        // 背景
+        let backgroundPlane = { x: 900, y: 60, speed: 1.0 };
+
+        let platforms = [];
+        let coinsArray = [];
+        let enemies = [];
+        let fireBars = [];
+        let bowser = null;
+        let bowserBridge = null;
+        let axeTrigger = null;
+        let goalPole = { x: 0, y: 0, w: 12, h: 260 };
+
+        // ==========================================
+        // 🗺️ マップデータ（ここを書き換えて自作できます）
+        // ==========================================
+        const STAGE_DATA = {
+            "1-1": {
+                levelWidth: 6200,
+                platforms: [
+                    { x: 0, y: GROUND_Y, w: 2200, h: 48, type: "ground" },
+                    { x: 2264, y: GROUND_Y, w: 480, h: 48, type: "ground" },
+                    { x: 2840, y: GROUND_Y, w: 2000, h: 48, type: "ground" },
+                    { x: 4936, y: GROUND_Y, w: 2000, h: 48, type: "ground" },
+                    { x: 900, y: GROUND_Y - 48, w: 64, h: 48, type: "pipe" },
+                    { x: 1200, y: GROUND_Y - 80, w: 64, h: 80, type: "pipe" },
+                    { x: 1500, y: GROUND_Y - 112, w: 64, h: 112, type: "pipe" },
+                    { x: 5656, y: GROUND_Y - 32, w: 32, h: 32, type: "block" }
+                ],
+                blockRows: [
+                    { startX: 512, y: GROUND_Y - 128, count: 1, type: "block" },
+                    { startX: 640, y: GROUND_Y - 128, count: 4, type: "block" },
+                    { startX: 2400, y: GROUND_Y - 128, count: 3, type: "block" },
+                    { startX: 2500, y: GROUND_Y - 224, count: 8, type: "block" }
+                ],
+                stairs: [
+                    { startX: 3200, steps: 4, isGoingUp: true },
+                    { startX: 3328, steps: 4, isGoingUp: false },
+                    { startX: 5400, steps: 8, isGoingUp: true }
+                ],
+                enemies: [
+                    { x: 400, y: GROUND_Y - 24, w: 24, h: 24, vx: -1.2, vy: 0, isAlive: true },
+                    { x: 800, y: GROUND_Y - 24, w: 24, h: 24, vx: -1.2, vy: 0, isAlive: true },
+                    { x: 2150, y: GROUND_Y - 24, w: 24, h: 24, vx: 1.0, vy: 0, isAlive: true },
+                    { x: 1350, y: GROUND_Y - 24, w: 24, h: 24, vx: -1.2, vy: 0, isAlive: true }
+                ],
+                goalX: 5900
+            },
+            "1-2": {
+                levelWidth: 5500,
+                platforms: [
+                    { x: 0, y: GROUND_Y, w: 1800, h: 48, type: "underground" },
+                    { x: 1900, y: GROUND_Y, w: 1200, h: 48, type: "underground" },
+                    { x: 3200, y: GROUND_Y, w: 2500, h: 48, type: "underground" },
+                    { x: 200, y: 0, w: 4800, h: 60, type: "underground" },
+                    { x: 2500, y: GROUND_Y - 160, w: 64, h: 160, type: "underground" },
+                    { x: 3800, y: GROUND_Y - 128, w: 96, h: 128, type: "underground" },
+                    { x: 1600, y: GROUND_Y - 96, w: 64, h: 96, type: "pipe" },
+                    { x: 4500, y: GROUND_Y - 128, w: 64, h: 128, type: "pipe" }
+                ],
+                blockRows: [
+                    { startX: 500, y: GROUND_Y - 128, count: 5, type: "underground" },
+                    { startX: 1200, y: GROUND_Y - 200, count: 6, type: "underground" }
+                ],
+                enemies: [
+                    { x: 700, y: GROUND_Y - 24, w: 24, h: 24, vx: -1.5, vy: 0, isAlive: true },
+                    { x: 2000, y: GROUND_Y - 24, w: 24, h: 24, vx: -1.5, vy: 0, isAlive: true }
+                ],
+                goalX: 5200
+            },
+            "1-3": {
+                levelWidth: 5000,
+                platforms: [
+                    { x: 0, y: GROUND_Y, w: 400, h: 48, type: "ground" },
+                    { x: 4600, y: GROUND_Y, w: 400, h: 48, type: "ground" }
+                ],
+                treePlats: [
+                    {x: 550, y: 280, w: 120}, {x: 750, y: 200, w: 90}, {x: 950, y: 280, w: 150},
+                    {x: 1250, y: 160, w: 120}, {x: 1500, y: 240, w: 180}, {x: 1800, y: 200, w: 60},
+                    {x: 2000, y: 280, w: 200}, {x: 2350, y: 180, w: 90}, {x: 2600, y: 240, w: 120},
+                    {x: 2900, y: 160, w: 150}, {x: 3200, y: 280, w: 90}, {x: 3500, y: 200, w: 180},
+                    {x: 3850, y: 150, w: 60}, {x: 4100, y: 260, w: 250}
+                ],
+                coinRatio: 0.5,
+                goalX: 4750
+            },
+            "1-4": {
+                levelWidth: 3200,
+                platforms: [
+                    { x: 0, y: GROUND_Y, w: 800, h: 48, type: "castle" },
+                    { x: 950, y: GROUND_Y, w: 400, h: 48, type: "castle" },
+                    { x: 1500, y: GROUND_Y, w: 600, h: 48, type: "castle" },
+                    { x: 2300, y: GROUND_Y, w: 200, h: 48, type: "castle" },
+                    { x: 2750, y: GROUND_Y, w: 450, h: 48, type: "castle" },
+                    { x: 0, y: 0, w: 3200, h: 48, type: "castle" },
+                    { x: 500, y: GROUND_Y - 128, w: 96, h: 128, type: "castle" },
+                    { x: 1200, y: 48, w: 64, h: 160, type: "castle" }
+                ],
+                bridge: { x: 2500, y: GROUND_Y, w: 250, h: 16, type: "bridge" },
+                fireBars: [
+                    { cx: 650, cy: GROUND_Y - 96, angle: 0, length: 5, speed: 0.03 },
+                    { cx: 1100, cy: GROUND_Y - 48, angle: Math.PI, length: 6, speed: -0.025 },
+                    { cx: 1700, cy: 150, angle: 0, length: 5, speed: 0.035 }
+                ],
+                bowser: { x: 2550, y: GROUND_Y - 64, w: 64, h: 64, vx: -0.8, dir: -1, hp: 5, isAlive: true },
+                axeTrigger: { x: 2770, y: GROUND_Y - 40, w: 32, h: 40 }
+            },
+            "2-1": {
+                levelWidth: 6000,
+                platforms: [
+                    { x: 0, y: GROUND_Y, w: 1200, h: 48, type: "ground" },
+                    { x: 1400, y: GROUND_Y, w: 300, h: 48, type: "ground" },
+                    { x: 1900, y: GROUND_Y, w: 300, h: 48, type: "ground" },
+                    { x: 2400, y: GROUND_Y, w: 1500, h: 48, type: "ground" },
+                    { x: 4100, y: GROUND_Y - 64, w: 200, h: 112, type: "ground" }, 
+                    { x: 4500, y: GROUND_Y, w: 1500, h: 48, type: "ground" },
+                    { x: 1000, y: GROUND_Y - 96, w: 64, h: 96, type: "pipe" },
+                    { x: 2600, y: GROUND_Y - 160, w: 64, h: 160, type: "pipe" }
+                ],
+                blockRows: [
+                    { startX: 600, y: GROUND_Y - 128, count: 5, type: "block" }
+                ],
+                stairs: [
+                    { startX: 3000, steps: 5, isGoingUp: true },
+                    { startX: 3500, steps: 5, isGoingUp: false }
+                ],
+                enemies: [
+                    { x: 500, y: GROUND_Y - 24, w: 24, h: 24, vx: -1.5, vy: 0, isAlive: true },
+                    { x: 1500, y: GROUND_Y - 24, w: 24, h: 24, vx: -1.0, vy: 0, isAlive: true },
+                    { x: 2850, y: GROUND_Y - 24, w: 24, h: 24, vx: -1.6, vy: 0, isAlive: true },
+                    { x: 4700, y: GROUND_Y - 24, w: 24, h: 24, vx: -2.0, vy: 0, isAlive: true }
+                ],
+                goalX: 5700
+            },
+            "2-2": {
+                levelWidth: 5800,
+                platforms: [
+                    { x: 0, y: GROUND_Y, w: 1500, h: 48, type: "underground" },
+                    { x: 1650, y: GROUND_Y, w: 800, h: 48, type: "underground" },
+                    { x: 2600, y: GROUND_Y, w: 1200, h: 48, type: "underground" },
+                    { x: 4000, y: GROUND_Y, w: 1800, h: 48, type: "underground" },
+                    { x: 400, y: 0, w: 5000, h: 96, type: "underground" },
+                    { x: 1800, y: 96, w: 400, h: 128, type: "underground" },
+                    { x: 1200, y: GROUND_Y - 96, w: 64, h: 96, type: "pipe" },
+                    { x: 3500, y: GROUND_Y - 128, w: 64, h: 128, type: "pipe" }
+                ],
+                blockRows: [
+                    { startX: 600, y: GROUND_Y - 96, count: 4, type: "underground" },
+                    { startX: 2800, y: GROUND_Y - 160, count: 8, type: "underground" }
+                ],
+                enemies: [
+                    { x: 800, y: GROUND_Y - 24, w: 24, h: 24, vx: -2.0, vy: 0, isAlive: true },
+                    { x: 2100, y: GROUND_Y - 24, w: 24, h: 24, vx: -1.8, vy: 0, isAlive: true },
+                    { x: 3100, y: GROUND_Y - 24, w: 24, h: 24, vx: -2.2, vy: 0, isAlive: true }
+                ],
+                goalX: 5500
+            },
+            "2-3": {
+                levelWidth: 5200,
+                platforms: [
+                    { x: 0, y: GROUND_Y, w: 350, h: 48, type: "ground" },
+                    { x: 4800, y: GROUND_Y, w: 400, h: 48, type: "ground" }
+                ],
+                treePlats: [
+                    {x: 450, y: 300, w: 80},  {x: 600, y: 220, w: 80},  {x: 800, y: 160, w: 100},
+                    {x: 1050, y: 240, w: 60}, {x: 1200, y: 320, w: 120}, {x: 1450, y: 200, w: 80},
+                    {x: 1700, y: 150, w: 140}, {x: 1950, y: 260, w: 60},  {x: 2150, y: 320, w: 100},
+                    {x: 2400, y: 220, w: 80},  {x: 2600, y: 140, w: 80},  {x: 2850, y: 220, w: 150},
+                    {x: 3150, y: 300, w: 60},  {x: 3350, y: 200, w: 100}, {x: 3600, y: 140, w: 60},
+                    {x: 3800, y: 240, w: 200}, {x: 4150, y: 300, w: 80},  {x: 4400, y: 200, w: 120}
+                ],
+                coinRatio: 0.7,
+                goalX: 4950
+            },
+            "2-4": {
+                levelWidth: 3600,
+                platforms: [
+                    { x: 0, y: GROUND_Y, w: 600, h: 48, type: "castle" },
+                    { x: 750, y: GROUND_Y, w: 300, h: 48, type: "castle" },
+                    { x: 1200, y: GROUND_Y, w: 300, h: 48, type: "castle" },
+                    { x: 1650, y: GROUND_Y, w: 500, h: 48, type: "castle" },
+                    { x: 2300, y: GROUND_Y, w: 200, h: 48, type: "castle" },
+                    { x: 2950, y: GROUND_Y, w: 650, h: 48, type: "castle" },
+                    { x: 0, y: 0, w: 3600, h: 48, type: "castle" },
+                    { x: 400, y: GROUND_Y - 96, w: 64, h: 96, type: "castle" },
+                    { x: 1400, y: 48, w: 96, h: 160, type: "castle" },
+                    { x: 1900, y: GROUND_Y - 160, w: 64, h: 160, type: "castle" }
+                ],
+                bridge: { x: 2700, y: GROUND_Y, w: 250, h: 16, type: "bridge" },
+                fireBars: [
+                    { cx: 500, cy: GROUND_Y - 48, angle: 0, length: 6, speed: 0.045 },
+                    { cx: 900, cy: GROUND_Y - 128, angle: Math.PI, length: 5, speed: -0.04 },
+                    { cx: 1350, cy: 120, angle: 0, length: 6, speed: 0.05 },
+                    { cx: 1800, cy: GROUND_Y - 48, angle: Math.PI/2, length: 5, speed: 0.04 },
+                    { cx: 2100, cy: GROUND_Y - 128, angle: 0, length: 6, speed: -0.045 }
+                ],
+                bowser: { x: 2750, y: GROUND_Y - 64, w: 64, h: 64, vx: -1.4, dir: -1, hp: 8, isAlive: true },
+                axeTrigger: { x: 2970, y: GROUND_Y - 40, w: 32, h: 40 }
+            },
+            "3-1": {
+                levelWidth: 6200,
+                platforms: [
+                    { x: 0, y: GROUND_Y, w: 800, h: 48, type: "ground" },
+                    { x: 1000, y: GROUND_Y, w: 150, h: 48, type: "ground" },
+                    { x: 1300, y: GROUND_Y, w: 150, h: 48, type: "ground" },
+                    { x: 1600, y: GROUND_Y, w: 150, h: 48, type: "ground" },
+                    { x: 1900, y: GROUND_Y, w: 1200, h: 48, type: "ground" },
+                    { x: 3300, y: GROUND_Y - 64, w: 200, h: 112, type: "ground" },
+                    { x: 3700, y: GROUND_Y - 128, w: 200, h: 176, type: "ground" },
+                    { x: 4100, y: GROUND_Y, w: 2100, h: 48, type: "ground" },
+                    { x: 4500, y: GROUND_Y - 128, w: 64, h: 128, type: "pipe" },
+                    { x: 4900, y: GROUND_Y - 192, w: 64, h: 192, type: "pipe" }
+                ],
+                blockRows: [
+                    { startX: 2100, y: GROUND_Y - 128, count: 3, type: "block" },
+                    { startX: 2300, y: GROUND_Y - 224, count: 2, type: "block" },
+                    { startX: 2500, y: GROUND_Y - 128, count: 3, type: "block" }
+                ],
+                stairs: [
+                    { startX: 5200, steps: 6, isGoingUp: true }
+                ],
+                enemies: [
+                    { x: 600, y: GROUND_Y - 24, w: 24, h: 24, vx: -2.2, vy: 0, isAlive: true },
+                    { x: 2000, y: GROUND_Y - 24, w: 24, h: 24, vx: -2.0, vy: 0, isAlive: true },
+                    { x: 2600, y: GROUND_Y - 24, w: 24, h: 24, vx: -2.5, vy: 0, isAlive: true },
+                    { x: 4300, y: GROUND_Y - 24, w: 24, h: 24, vx: -2.2, vy: 0, isAlive: true }
+                ],
+                goalX: 5900
+            },
+            "3-2": {
+                levelWidth: 5600,
+                platforms: [
+                    { x: 0, y: GROUND_Y, w: 1200, h: 48, type: "underground" },
+                    { x: 1350, y: GROUND_Y, w: 1000, h: 48, type: "underground" },
+                    { x: 2500, y: GROUND_Y, w: 1200, h: 48, type: "underground" },
+                    { x: 3900, y: GROUND_Y, w: 1700, h: 48, type: "underground" },
+                    { x: 200, y: 0, w: 5000, h: 160, type: "underground" },
+                    { x: 1500, y: 160, w: 500, h: 64, type: "underground" },
+                    { x: 1100, y: GROUND_Y - 96, w: 64, h: 96, type: "pipe" },
+                    { x: 3300, y: GROUND_Y - 96, w: 64, h: 96, type: "pipe" }
+                ],
+                blockRows: [
+                    { startX: 600, y: GROUND_Y - 96, count: 6, type: "underground" },
+                    { startX: 2700, y: GROUND_Y - 128, count: 5, type: "underground" }
+                ],
+                enemies: [
+                    { x: 700, y: GROUND_Y - 24, w: 24, h: 24, vx: -2.5, vy: 0, isAlive: true },
+                    { x: 900, y: GROUND_Y - 24, w: 24, h: 24, vx: -2.3, vy: 0, isAlive: true },
+                    { x: 1800, y: GROUND_Y - 24, w: 24, h: 24, vx: -2.6, vy: 0, isAlive: true },
+                    { x: 2000, y: GROUND_Y - 24, w: 24, h: 24, vx: -2.4, vy: 0, isAlive: true },
+                    { x: 4200, y: GROUND_Y - 24, w: 24, h: 24, vx: -3.0, vy: 0, isAlive: true }
+                ],
+                goalX: 5300
+            },
+            "3-3": {
+                levelWidth: 5400,
+                platforms: [
+                    { x: 0, y: GROUND_Y, w: 300, h: 48, type: "ground" },
+                    { x: 5000, y: GROUND_Y, w: 400, h: 48, type: "ground" }
+                ],
+                treePlats: [
+                    {x: 400, y: 320, w: 60},  {x: 550, y: 240, w: 60},  {x: 700, y: 160, w: 60},
+                    {x: 900, y: 220, w: 80},  {x: 1100, y: 300, w: 60}, {x: 1300, y: 200, w: 60},
+                    {x: 1500, y: 140, w: 100}, {x: 1750, y: 240, w: 50}, {x: 1950, y: 320, w: 80},
+                    {x: 2200, y: 240, w: 60},  {x: 2400, y: 160, w: 60}, {x: 2650, y: 220, w: 120},
+                    {x: 2950, y: 300, w: 50},  {x: 3150, y: 200, w: 80}, {x: 3400, y: 130, w: 50},
+                    {x: 3600, y: 220, w: 150}, {x: 3900, y: 300, w: 60}, {x: 4100, y: 200, w: 60},
+                    {x: 4300, y: 140, w: 80},  {x: 4600, y: 240, w: 100}
+                ],
+                coinRatio: 0.8,
+                goalX: 5150
+            },
+            "3-4": {
+                levelWidth: 3800,
+                platforms: [
+                    { x: 0, y: GROUND_Y, w: 500, h: 48, type: "castle" },
+                    { x: 650, y: GROUND_Y, w: 300, h: 48, type: "castle" },
+                    { x: 1100, y: GROUND_Y, w: 300, h: 48, type: "castle" },
+                    { x: 1550, y: GROUND_Y, w: 400, h: 48, type: "castle" },
+                    { x: 2100, y: GROUND_Y, w: 300, h: 48, type: "passable_floor" },
+                    { x: 3050, y: GROUND_Y, w: 750, h: 48, type: "castle" },
+                    { x: 0, y: 0, w: 3800, h: 48, type: "castle" },
+                    { x: 350, y: GROUND_Y - 128, w: 64, h: 128, type: "castle" },
+                    { x: 1250, y: 48, w: 96, h: 192, type: "castle" },
+                    { x: 1800, y: GROUND_Y - 160, w: 64, h: 160, type: "castle" },
+                    { x: 2300, y: 48, w: 128, h: 160, type: "castle" }
+                ],
+                bridge: { x: 2800, y: GROUND_Y, w: 250, h: 16, type: "bridge" },
+                fireBars: [
+                    { cx: 450, cy: GROUND_Y - 48, angle: 0, length: 7, speed: 0.055 },
+                    { cx: 800, cy: GROUND_Y - 128, angle: Math.PI, length: 6, speed: -0.05 },
+                    { cx: 1200, cy: 100, angle: 0, length: 7, speed: 0.06 },
+                    { cx: 1500, cy: GROUND_Y - 48, angle: Math.PI/2, length: 6, speed: 0.05 },
+                    { cx: 1700, cy: 120, angle: Math.PI, length: 6, speed: -0.055 },
+                    { cx: 2000, cy: GROUND_Y - 48, angle: 0, length: 7, speed: 0.06 },
+                    { cx: 2250, cy: GROUND_Y - 128, angle: Math.PI/4, length: 6, speed: -0.055 },
+                    { cx: 2500, cy: GROUND_Y - 48, angle: 0, length: 7, speed: 0.065 }
+                ],
+                bowser: { x: 2850, y: GROUND_Y - 64, w: 64, h: 64, vx: -2.0, dir: -1, hp: 12, isAlive: true },
+                axeTrigger: { x: 3070, y: GROUND_Y - 40, w: 32, h: 40 }
+            }
+        };
+
+        let keys = { Space: false, ArrowLeft: false, ArrowRight: false, ShiftLeft: false, ShiftRight: false, ArrowDown: false, KeyS: false };
+        window.addEventListener("keydown", e => { 
+            if (e.code in keys) keys[e.code] = true; 
+            if (e.code === "ShiftLeft" || e.code === "ShiftRight") keys.ShiftLeft = true;
+            if (e.code === "ArrowDown") keys.ArrowDown = true;
+            if (e.code === "KeyS") keys.KeyS = true;
+            if (e.code === "Space") keys.Space = true;
+            
+            if (e.code === "Enter" && !gameActive && document.getElementById("overlay").style.display !== "none") {
+                initGameStage();
+            }
+        });
+        window.addEventListener("keyup", e => { 
+            if (e.code in keys) keys[e.code] = false; 
+            if (e.code === "ShiftLeft" || e.code === "ShiftRight") keys.ShiftLeft = false;
+            if (e.code === "ArrowDown") keys.ArrowDown = false;
+            if (e.code === "KeyS") keys.KeyS = false;
+            if (e.code === "Space") keys.Space = false;
+        });
+
+        function applySelectedStage() {
+            const dropdown = document.getElementById("stage-dropdown");
+            const val = dropdown.value.split("-");
+            currentWorld = parseInt(val[0]);
+            currentStage = parseInt(val[1]);
+            
+            if (document.activeElement) {
+                document.activeElement.blur();
+            }
+
+            initGameStage();
+        }
+
+        function syncDropdownValue() {
+            document.getElementById("stage-dropdown").value = `${currentWorld}-${currentStage}`;
+        }
+
+        // ==========================================
+        // 🏗️ マップ生成ロジック（整理して読み込みを統合）
+        // ==========================================
+        function generateWorld1Map() {
+            platforms = []; coinsArray = []; enemies = []; fireBars = []; bowser = null; bowserBridge = null; axeTrigger = null;
+            cameraX = 0; backgroundPlane.x = 900;
+
+            const data = STAGE_DATA[`${currentWorld}-${currentStage}`];
+            if (!data) return;
+
+            levelWidth = data.levelWidth;
+
+            // 1. 基本の足場を配置
+            if (data.platforms) {
+                platforms = [...data.platforms];
+            }
+
+            // 2. ブロック列を生成
+            if (data.blockRows) {
+                data.blockRows.forEach(row => {
+                    createBlockRow(row.startX, row.y, row.count, row.type);
+                });
+            }
+
+            // 3. 階段を生成
+            if (data.stairs) {
+                data.stairs.forEach(st => {
+                    createStairs(st.startX, st.steps, st.isGoingUp);
+                });
+            }
+
+            // 4. 大樹ステージの特殊処理（treePlats）
+            if (data.treePlats) {
+                data.treePlats.forEach(tp => {
+                    platforms.push({ x: tp.x, y: tp.y, w: tp.w, h: 24, type: "tree" });
+                    if (Math.random() < data.coinRatio) {
+                        coinsArray.push({ x: tp.x + tp.w/2 - 7, y: tp.y - 30, collected: false });
+                    }
+                });
+            }
+
+            // 5. 敵キャラクターを配置
+            if (data.enemies) {
+                // ディープコピーして元のデータを汚染しないようにする
+                enemies = data.enemies.map(e => ({...e}));
+            }
+
+            // 6. クッパ城ステージ用の特殊オブジェクト
+            if (data.bridge) bowserBridge = {...data.bridge};
+            if (data.fireBars) fireBars = data.fireBars.map(f => ({...f}));
+            if (data.bowser) bowser = {...data.bowser};
+            if (data.axeTrigger) axeTrigger = {...data.axeTrigger};
+
+            // 7. ゴールポールの配置（クッパ城以外）
+            if (currentStage !== 4 && data.goalX) {
+                goalPole.x = data.goalX; 
+                goalPole.y = GROUND_Y - goalPole.h;
+            }
+        }
+
+        function createBlockRow(startX, y, count, type="block") {
+            for (let i = 0; i < count; i++) {
+                let bx = startX + (i * 32);
+                platforms.push({ x: bx, y: y, w: 32, h: 32, type: type });
+                if (Math.random() < 0.3) coinsArray.push({ x: bx + 8, y: y - 28, collected: false });
+            }
+        }
+
+        function createStairs(startX, steps, isGoingUp) {
+            const size = 32;
+            for (let i = 1; i <= steps; i++) {
+                let x = isGoingUp ? startX + (i - 1) * size : startX + (steps - i) * size;
+                let h = i * size;
+                platforms.push({ x: x, y: GROUND_Y - h, w: size, h: h, type: "block" });
+            }
+        }
+
+        function initGameStage() {
+            document.getElementById("overlay").style.display = "none";
+            document.getElementById("stage-val").innerText = `${currentWorld}-${currentStage}`;
+            
+            syncDropdownValue();
+
+            player.x = 60;
+            player.y = 200;
+            player.vx = 0;
+            player.vy = 0;
+            player.isGrounded = false;
+            player.onPassableFloor = false;
+
+            generateWorld1Map();
+
+            stageTimer = currentStage === 4 ? 300 : 400;
+            gameActive = true;
+
+            if (timerId) clearInterval(timerId);
+            timerId = setInterval(() => {
+                if (gameActive) {
+                    stageTimer--;
+                    document.getElementById("time-val").innerText = stageTimer;
+                    if (stageTimer <= 0) handleGameOver();
+                }
+            }, 1000);
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function gameLoop() {
+            if (!gameActive) return;
+            update();
+            drawBackground();
+            drawAction();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function update() {
+            backgroundPlane.x -= backgroundPlane.speed;
+            if (backgroundPlane.x < -150) backgroundPlane.x = SCREEN_WIDTH + 200;
+
+            let maxSpeed = keys.ShiftLeft ? 7.0 : 4.5; 
+            let accel = player.isGrounded ? 0.8 : 0.6; 
+
+            if (keys.ArrowLeft) {
+                player.vx = Math.max(-maxSpeed, player.vx - accel);
+                player.facing = -1;
+            } else if (keys.ArrowRight) {
+                player.vx = Math.min(maxSpeed, player.vx + accel);
+                player.facing = 1;
+            } else {
+                player.vx *= player.isGrounded ? 0.75 : 0.92;
+            }
+
+            // 通常のジャンプ処理
+            if (keys.Space && player.isGrounded) {
+                player.vy = keys.ShiftLeft ? -16.5 : -14.5; 
+                player.isGrounded = false;
+            }
+            if (!keys.Space && player.vy < -5.0) {
+                player.vy = -5.0;
+            }
+
+            // ボス手前の足場でスペース長押しによる飛翔ギミック
+            if (currentWorld === 3 && currentStage === 4 && player.onPassableFloor && keys.Space) {
+                player.vy = -6.5; // 上昇速度を維持して自由に飛べる
+                player.isGrounded = false;
+            }
+
+            // すり抜け床の下降り処理 (ArrowDown or S)
+            if (currentWorld === 3 && currentStage === 4 && (keys.ArrowDown || keys.KeyS)) {
+                platforms.forEach(p => {
+                    if (p.type === "passable_floor") {
+                        if (player.x + player.w > p.x && player.x < p.x + p.w) {
+                            if (player.y + player.h >= p.y - 10 && player.y <= p.y + p.h + 10) {
+                                player.y = p.y + p.h + 5; 
+                                player.vy = 4; 
+                                player.isGrounded = false;
+                                player.onPassableFloor = false;
+                            }
+                        }
+                    }
+                });
+            }
+
+            player.vy += GRAVITY;
+            player.x += player.vx;
+            player.y += player.vy;
+
+            if (player.x < 0) player.x = 0;
+
+            player.isGrounded = false;
+            
+            // ループの前に一度飛行用フラグをチェック（足場から外れたら切るため）
+            let stillOnFloor = false;
+
+            let activePlatforms = [...platforms];
+            if (bowserBridge) activePlatforms.push(bowserBridge);
+
+            for (let p of activePlatforms) {
+                if (p.type === "passable_floor" && (keys.ArrowDown || keys.KeyS)) continue;
+
+                if (player.x + player.w > p.x && player.x < p.x + p.w &&
+                    player.y + player.h > p.y && player.y < p.y + p.h) {
+                    
+                    if (player.vy > 0 && player.y + player.h - player.vy <= p.y + 10) {
+                        player.y = p.y - player.h; player.vy = 0; player.isGrounded = true;
+                        
+                        // 該当の特殊足場に着地した際にフラグをONにする
+                        if (p.type === "passable_floor") {
+                            stillOnFloor = true;
+                        }
+                    } else if (player.vy < 0 && player.y - player.vy >= p.y + p.h - 10) {
+                        player.y = p.y + p.h; player.vy = 0;
+                    } else {
+                        if (player.vx > 0) player.x = p.x - player.w;
+                        if (player.vx < 0) player.x = p.x + p.w;
+                    }
+                }
+            }
+            
+            // X座標が足場の範囲内かつ着地していれば飛行能力を維持
+            if (stillOnFloor) {
+                player.onPassableFloor = true;
+            } else if (player.isGrounded === false && player.vy > 0) {
+                platforms.forEach(p => {
+                    if (p.type === "passable_floor" && player.x + player.w > p.x && player.x < p.x + p.w) {
+                        if (player.y + player.h <= p.y + 2) stillOnFloor = true; 
+                    }
+                });
+                if (!stillOnFloor) player.onPassableFloor = false;
+            }
+
+            if (player.y > SCREEN_HEIGHT) { 
+                handleGameOver(); 
+                return; 
+            }
+
+            if (cameraX > levelWidth - SCREEN_WIDTH) cameraX = levelWidth - SCREEN_WIDTH;
+
+            if (player.x > cameraX + SCREEN_WIDTH / 2) {
+                cameraX = player.x - SCREEN_WIDTH / 2;
+                if (cameraX > levelWidth - SCREEN_WIDTH) cameraX = levelWidth - SCREEN_WIDTH;
+            }
+
+            for (let c of coinsArray) {
+                if (!c.collected && player.x + player.w > c.x && player.x < c.x + 16 &&
+                    player.y + player.h > c.y && player.y < c.y + 16) {
+                    c.collected = true; coins++; score += 200;
+                    document.getElementById("coin-val").innerText = String(coins).padStart(2, '0');
+                    document.getElementById("score-val").innerText = String(score).padStart(6, '0');
+                }
+            }
+
+            for (let fb of fireBars) {
+                fb.angle += fb.speed;
+                for (let i = 0; i < fb.length; i++) {
+                    let ballX = fb.cx + Math.cos(fb.angle) * (i * 16);
+                    let ballY = fb.cy + Math.sin(fb.angle) * (i * 16);
+                    if (player.x + player.w > ballX - 6 && player.x < ballX + 6 &&
+                        player.y + player.h > ballY - 6 && player.y < ballY + 6) {
+                        handleGameOver(); return;
+                    }
+                }
+            }
+
+            for (let e of enemies) {
+                if (!e.isAlive) continue;
+
+                e.vy += GRAVITY;
+                e.x += e.vx;
+                e.y += e.vy;
+
+                for (let p of platforms) {
+                    if (e.x + e.w > p.x && e.x < p.x + p.w && e.y + e.h > p.y && e.y < p.y + p.h) {
+                        if (e.vy > 0 && e.y + e.h - e.vy <= p.y + 8) {
+                            e.y = p.y - e.h;
+                            e.vy = 0;
+                        } else {
+                            e.vx *= -1; e.x += e.vx;
+                        }
+                    }
+                }
+
+                if (e.y > SCREEN_HEIGHT) {
+                    e.isAlive = false;
+                    continue; 
+                }
+
+                if (player.x + player.w > e.x && player.x < e.x + e.w &&
+                    player.y + player.h > e.y && player.y < e.y + e.h) {
+                    if (player.vy > 0 && player.y + player.h - player.vy <= e.y + 10) {
+                        e.isAlive = false; player.vy = -8; score += 100;
+                        document.getElementById("score-val").innerText = String(score).padStart(6, '0');
+                    } else {
+                        handleGameOver(); return;
+                    }
+                }
+            }
+
+            if (bowser && bowser.isAlive) {
+                bowser.x += bowser.vx;
+                let minX = currentWorld === 3 ? 2700 : (currentWorld === 2 ? 2600 : 2480);
+                let maxX = currentWorld === 3 ? 2950 : (currentWorld === 2 ? 2850 : 2680);
+                if (bowser.x < minX || bowser.x > maxX) bowser.vx *= -1;
+                
+                if (player.x + player.w > bowser.x && player.x < bowser.x + bowser.w &&
+                    player.y + player.h > bowser.y && player.y < bowser.y + bowser.h) {
+                    handleGameOver(); return;
+                }
+            }
+
+            if (axeTrigger && player.x + player.w > axeTrigger.x && player.x < axeTrigger.x + axeTrigger.w &&
+                player.y + player.h > axeTrigger.y && player.y < axeTrigger.y + axeTrigger.h) {
+                bowserBridge = null;
+                if (bowser) { bowser.isAlive = false; bowser.y = 999; }
+                setTimeout(() => { handleStageClear(); }, 1000);
+                axeTrigger = null;
+            }
+
+            if (currentStage !== 4 && player.x + player.w > goalPole.x && player.x < goalPole.x + goalPole.w) {
+                handleStageClear();
+            }
+        }
+
+        function handleStageClear() {
+            gameActive = false; clearInterval(timerId);
+            score += stageTimer * 10;
+            document.getElementById("score-val").innerText = String(score).padStart(6, '0');
+
+            if (currentStage < 4) {
+                currentStage++;
+                document.getElementById("overlay-title").innerText = "STAGE CLEAR!";
+                document.getElementById("overlay-text").innerText = `ドナルド、次の作戦へ進みます。\n次はステージ ${currentWorld}-${currentStage} です。\n【Enterキー】で進発！`;
+            } else {
+                if (currentWorld === 1) {
+                    currentWorld = 2;
+                    currentStage = 1;
+                    document.getElementById("overlay-title").innerText = "WORLD 1 CLEARED!";
+                    document.getElementById("overlay-text").innerText = `作戦第二段階へ移行します。\n舞台はさらに険しい【WORLD 2-1】へ。\n【Enterキー】で未踏の地へ進発！`;
+                } else if (currentWorld === 2) {
+                    currentWorld = 3;
+                    currentStage = 1;
+                    document.getElementById("overlay-title").innerText = "WORLD 2 CLEARED!";
+                    document.getElementById("overlay-text").innerText = `最終作戦段階（ファイナルフェーズ）へ移行します。\n最高難度を誇る【WORLD 3-1】へ。\n【Enterキー】で決戦の地へ進発！`;
+                } else {
+                    document.getElementById("overlay-title").innerText = "🇺🇸 ALL WORLD COMPLETION 🇺🇸";
+                    document.getElementById("overlay-text").innerText = `全3ワールド・計12ステージを完全攻略しました！\n世界に真の平和が訪れました。あなたは伝説の大統領です！\n【Enterキー】で凱旋プレイ（最初から）へ。`;
+                    currentWorld = 1;
+                    currentStage = 1;
+                }
+            }
+            
+            syncDropdownValue();
+            
+            document.getElementById("overlay-btn").innerText = "Enterを押して次へ";
+            document.getElementById("overlay").style.display = "flex";
+        }
+
+        function handleGameOver() {
+            gameActive = false; clearInterval(timerId);
+            document.getElementById("overlay-title").innerText = "NEVER GIVE UP";
+            document.getElementById("overlay-title").style.color = "#f44336";
+            document.getElementById("overlay-text").innerText = `ステージ ${currentWorld}-${currentStage} で一時撤退を余儀なくされました。\n【Enterキー】を押して不屈の精神でリトライ！`;
+            document.getElementById("overlay-btn").innerText = "Enterでリトライ";
+            document.getElementById("overlay").style.display = "flex";
+        }
+
+        function drawBackground() {
+            bgCtx.clearRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+            if (currentStage === 2) bgCtx.fillStyle = "#000000";
+            else if (currentStage === 4) bgCtx.fillStyle = "#1a001a";
+            else bgCtx.fillStyle = "#5c94fc";
+            bgCtx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+            bgCtx.save();
+            bgCtx.translate(-cameraX * 0.2, 0);
+            for (let i = 0; i < 30; i++) {
+                let bx = i * 280 + 40;
+                bgCtx.fillStyle = currentStage === 2 ? "#111" : (currentStage === 4 ? "#2a142e" : "#2c3e50");
+                bgCtx.fillRect(bx, 100, 110, SCREEN_HEIGHT);
+                bgCtx.fillStyle = currentStage === 4 ? "#990033" : "#f1c40f";
+                for(let wy = 130; wy < SCREEN_HEIGHT - 60; wy += 40) {
+                    bgCtx.fillRect(bx + 25, wy, 15, 20);
+                    bgCtx.fillRect(bx + 70, wy, 15, 20);
+                }
+            }
+            bgCtx.restore();
+
+            bgCtx.save();
+            bgCtx.translate(-cameraX * 0.4, 0);
+            let px = backgroundPlane.x + cameraX * 0.4;
+            bgCtx.fillStyle = currentStage === 4 ? "#ff3333" : "#ffffff";
+            bgCtx.fillRect(px, backgroundPlane.y, 75, 16);
+            bgCtx.fillRect(px + 40, backgroundPlane.y - 12, 14, 40);
+            bgCtx.restore();
+        }
+
+        function drawAction() {
+            ctx.clearRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+            ctx.save();
+            ctx.translate(-cameraX, 0);
+
+            for (let p of platforms) {
+                if (p.type === "ground") ctx.fillStyle = "#c84c0c";
+                else if (p.type === "underground") ctx.fillStyle = "#0044aa"; 
+                else if (p.type === "tree") ctx.fillStyle = "#4caf50";
+                else if (p.type === "castle" || p.type === "passable_floor") ctx.fillStyle = "#555555"; 
+                else if (p.type === "pipe") ctx.fillStyle = "#00a800";
+                else ctx.fillStyle = "#d35400";
+
+                ctx.fillRect(p.x, p.y, p.w, p.h);
+                ctx.strokeStyle = "#000"; ctx.lineWidth = 1.5; ctx.strokeRect(p.x, p.y, p.w, p.h);
+            }
+
+            if (bowserBridge) {
+                ctx.fillStyle = "#ffaa00"; ctx.fillRect(bowserBridge.x, bowserBridge.y, bowserBridge.w, bowserBridge.h);
+                ctx.strokeRect(bowserBridge.x, bowserBridge.y, bowserBridge.w, bowserBridge.h);
+            }
+
+            for (let fb of fireBars) {
+                for (let i = 0; i < fb.length; i++) {
+                    let ballX = fb.cx + Math.cos(fb.angle) * (i * 16);
+                    let ballY = fb.cy + Math.sin(fb.angle) * (i * 16);
+                    ctx.fillStyle = "#ff4500"; ctx.beginPath(); ctx.arc(ballX, ballY, 7, 0, Math.PI*2); ctx.fill();
+                    ctx.fillStyle = "#ffd700"; ctx.beginPath(); ctx.arc(ballX, ballY, 4, 0, Math.PI*2); ctx.fill();
+                }
+            }
+
+            for (let c of coinsArray) {
+                if (!c.collected) {
+                    ctx.fillStyle = "#ffd700"; ctx.fillRect(c.x, c.y, 14, 16);
+                    ctx.fillStyle = "#fff"; ctx.fillRect(c.x+2, c.y+2, 10, 12);
+                }
+            }
+
+            for (let e of enemies) {
+                if (e.isAlive) {
+                    ctx.fillStyle = "#e67e22"; 
+                    ctx.fillRect(e.x, e.y, e.w, e.h);
+                    ctx.strokeStyle = "#000"; ctx.lineWidth = 1; ctx.strokeRect(e.x, e.y, e.w, e.h);
+                    
+                    ctx.fillStyle = "#ffffff"; 
+                    ctx.fillRect(e.x + 4, e.y + 4, 4, 8);
+                    ctx.fillRect(e.x + 16, e.y + 4, 4, 8);
+                    ctx.fillStyle = "#000000";
+                    ctx.fillRect(e.x + 5, e.y + 6, 2, 4);
+                    ctx.fillRect(e.x + 17, e.y + 6, 2, 4);
+                }
+            }
+
+            if (bowser && bowser.isAlive) {
+                ctx.fillStyle = "#008800"; ctx.fillRect(bowser.x, bowser.y, bowser.w, bowser.h);
+                ctx.fillStyle = "#ffaa00"; ctx.fillRect(bowser.x + 10, bowser.y + 10, 20, 20);
+                ctx.fillStyle = "#ff0000"; ctx.fillRect(bowser.x + 45, bowser.y + 15, 10, 10);
+            }
+
+            if (axeTrigger) {
+                ctx.fillStyle = "cyan"; ctx.fillRect(axeTrigger.x, axeTrigger.y, axeTrigger.w, axeTrigger.h);
+                ctx.fillStyle = "#fff"; ctx.font = "12px sans-serif"; ctx.fillText("🪓", axeTrigger.x + 6, axeTrigger.y + 24);
+            }
+
+            if (currentStage !== 4) {
+                ctx.fillStyle = "#eee"; ctx.fillRect(goalPole.x, goalPole.y, goalPole.w, goalPole.h);
+                ctx.fillStyle = "#e63946"; ctx.fillRect(goalPole.x + goalPole.w, goalPole.y + 10, 45, 25);
+            }
+
+            ctx.save();
+            ctx.translate(player.x + player.w / 2, player.y + player.h / 2);
+            ctx.scale(player.facing, 1);
+            
+            ctx.fillStyle = "#0f2042"; ctx.fillRect(-player.w / 2, -player.h / 2 + 10, player.w, player.h - 10);
+            ctx.fillStyle = "#ffffff"; ctx.fillRect(-4, -player.h / 2 + 10, 8, 8);
+            ctx.fillStyle = "#cc0000"; ctx.fillRect(-1.5, -player.h / 2 + 12, 3, 14);
+            ctx.fillStyle = "#ffcc99"; ctx.fillRect(-player.w / 2 + 4, -player.h / 2, player.w - 8, 11);
+            ctx.fillStyle = "#f1c40f"; ctx.fillRect(-player.w / 2 + 2, -player.h / 2 - 3, player.w - 2, 5);
+            ctx.restore();
+
+            ctx.restore();
+        }
+    </script>
+</body>
+</html>
